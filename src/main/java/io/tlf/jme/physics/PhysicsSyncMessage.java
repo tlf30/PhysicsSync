@@ -10,6 +10,7 @@ import com.jme3.scene.Spatial;
 public class PhysicsSyncMessage extends AbstractMessage {
 
     private PhysicsStateData[] data;
+    private long timestamp;
 
     public PhysicsSyncMessage() {
         this.setReliable(false);
@@ -21,5 +22,13 @@ public class PhysicsSyncMessage extends AbstractMessage {
 
     public PhysicsStateData[] getPhysicsData() {
         return data;
+    }
+
+    public void setTimestamp(long timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    public long getTimestamp() {
+        return timestamp;
     }
 }

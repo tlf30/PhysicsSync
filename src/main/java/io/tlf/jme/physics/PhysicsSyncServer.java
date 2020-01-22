@@ -11,23 +11,24 @@ import com.jme3.math.Vector3f;
 import com.jme3.network.HostedConnection;
 import com.jme3.network.Message;
 import com.jme3.network.MessageListener;
+import com.jme3.network.serializing.Serializable;
 import com.jme3.network.serializing.Serializer;
 import com.jme3.scene.Spatial;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
+
+import java.util.*;
 
 public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListener, MessageListener<HostedConnection> {
 
     private Application app;
-    private boolean loaded = false;
-    private long lastUpdate = 0;
-    private long updateInterval = 25; //in milliseconds
-    private float syncDistance = 100f;
+    private volatile boolean loaded = false;
+    private volatile long lastUpdate = 0;
+    private volatile long updateInterval = 25; //in milliseconds
+    private volatile float syncDistance = 100f;
     private HashMap<String, Boolean> updateStates = new HashMap<>();
     private HashMap<String, Spatial> objects = new HashMap<>();
     private HashMap<HostedConnection, Vector3f> clients = new HashMap<>();
     private HashMap<HostedConnection, Spatial> clientRelations = new HashMap<>();
+    private final Object lock = new Object();
     private BulletAppState physics;
 
     public PhysicsSyncServer(BulletAppState physics) {
@@ -40,11 +41,13 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @param s The Spatial to attach
      */
     public void add(Spatial s) {
-        if (s.getControl(PhysicsControl.class) != null) {
-            PhysicsControl control = s.getControl(PhysicsControl.class);
-            physics.getPhysicsSpace().add(control);
-            updateStates.put(s.getName(), true);
-            objects.put(s.getName(), s);
+        synchronized (lock) {
+            if (s.getControl(PhysicsControl.class) != null) {
+                PhysicsControl control = s.getControl(PhysicsControl.class);
+                physics.getPhysicsSpace().add(control);
+                updateStates.put(s.getName(), true);
+                objects.put(s.getName(), s);
+            }
         }
     }
 
@@ -53,12 +56,14 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @param s The Spatial to remove.
      */
     public void remove(Spatial s) {
-        if (s.getControl(PhysicsControl.class) != null) {
-            PhysicsControl control = s.getControl(PhysicsControl.class);
-            physics.getPhysicsSpace().remove(control);
+        synchronized (lock) {
+            if (s.getControl(PhysicsControl.class) != null) {
+                PhysicsControl control = s.getControl(PhysicsControl.class);
+                physics.getPhysicsSpace().remove(control);
+            }
+            updateStates.remove(s.getName());
+            objects.remove(s.getName());
         }
-        updateStates.remove(s.getName());
-        objects.remove(s.getName());
     }
 
     /**
@@ -76,7 +81,9 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @param c The Client to add.
      */
     public void add(HostedConnection c) {
-        clients.put(c, Vector3f.NAN.clone());
+        synchronized (lock) {
+            clients.put(c, Vector3f.NAN.clone());
+        }
     }
 
     /**
@@ -110,7 +117,9 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @param c The Network Client
      */
     public void removeRelation(HostedConnection c) {
-        clientRelations.remove(c);
+        synchronized (lock) {
+            clientRelations.remove(c);
+        }
     }
 
     /**
@@ -119,8 +128,10 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @param c The Client to remove.
      */
     public void remove(HostedConnection c) {
-        clients.remove(c);
-        clientRelations.remove(c);
+        synchronized (lock) {
+            clients.remove(c);
+            clientRelations.remove(c);
+        }
     }
 
     /**
@@ -128,7 +139,9 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @return A Collection containing all clients currently in the physics sync engine.
      */
     public Collection<HostedConnection> clients() {
-        return Collections.unmodifiableCollection(clients.keySet());
+        synchronized (lock) {
+            return Collections.unmodifiableCollection(clients.keySet());
+        }
     }
 
     /**
@@ -140,10 +153,12 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @param pos The Position of the Client
      */
     public void setLocation(HostedConnection c, Vector3f pos) {
-        if (clients.containsKey(c)) {
-            clients.get(c).set(pos);
-        } else {
-            clients.put(c, pos.clone());
+        synchronized (lock) {
+            if (clients.containsKey(c)) {
+                clients.get(c).set(pos);
+            } else {
+                clients.put(c, pos.clone());
+            }
         }
     }
 
@@ -157,8 +172,10 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @param relation The Spatial to base client position from.
      */
     public void setRelation(HostedConnection c, Spatial relation) {
-        setLocation(c, relation.getWorldTranslation());
-        clientRelations.put(c, relation);
+        synchronized (lock) {
+            setLocation(c, relation.getWorldTranslation());
+            clientRelations.put(c, relation);
+        }
     }
 
     /**
@@ -167,7 +184,9 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @return The Spatial that has a positional relation to the client.
      */
     public Spatial getRelation(HostedConnection c) {
-        return clientRelations.get(c);
+        synchronized (lock) {
+            return clientRelations.get(c);
+        }
     }
 
     /**
@@ -176,15 +195,19 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @return The position of the client as seen by the sync engine.
      */
     public Vector3f getLocation(HostedConnection c) {
-        return clients.get(c);
+        synchronized (lock) {
+            return clients.get(c);
+        }
     }
 
     /**
      * Remove all Network Clients from Physics Sync Engine.
      */
     public void clearClients() {
-        for (HostedConnection c : clients()) {
-            remove(c);
+        synchronized (lock) {
+            for (HostedConnection c : clients()) {
+                remove(c);
+            }
         }
     }
 
@@ -226,7 +249,9 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * @return A Collection containing all Spatials currently in the physics sync engine.
      */
     public Collection<Spatial> objects() {
-        return Collections.unmodifiableCollection(objects.values());
+        synchronized (lock) {
+            return Collections.unmodifiableCollection(objects.values());
+        }
     }
 
     /**
@@ -285,73 +310,85 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
         if (!loaded) { //Don't sync if not enabled.
             return;
         }
-
-        /*
-         * We can check if a control is moving by the isActive() function.
-         * In order to do this, check over the Physics Objects in the world
-         * We will send one final update after the object has stopped moving.
-         *
-         * Store object that need updated on clients in <code>updateStates</code>
-         */
-        for (Spatial obj : objects()) {
-            if (obj.getControl(PhysicsControl.class) != null) {
-                PhysicsControl control = obj.getControl(PhysicsControl.class);
-                if (control instanceof PhysicsRigidBody) {
-                    if (((PhysicsRigidBody) control).isActive()) {
-                        updateStates.put(obj.getName(), true); //Object state is active, and needs to be updated.
-                    } else {
-                        if (updateStates.containsKey(obj)) {
-                            Boolean lastState = updateStates.get(obj);
-                            if (!lastState) {
-                                //The object has been stale for an update already.
-                                //Will get removed on next sync
-                            } else {
-                                updateStates.put(obj.getName(), false); //Object is stale, but state will still get synced.
+        synchronized (lock) {
+            System.out.println("Updating physics");
+            /*
+             * We can check if a control is moving by the isActive() function.
+             * In order to do this, check over the Physics Objects in the world
+             * We will send one final update after the object has stopped moving.
+             *
+             * Store object that need updated on clients in <code>updateStates</code>
+             */
+            for (Spatial obj : objects()) {
+                if (obj.getControl(PhysicsControl.class) != null) {
+                    PhysicsControl control = obj.getControl(PhysicsControl.class);
+                    if (control instanceof PhysicsRigidBody) {
+                        if (((PhysicsRigidBody) control).isActive()) {
+                            updateStates.put(obj.getName(), true); //Object state is active, and needs to be updated.
+                        } else {
+                            if (updateStates.containsKey(obj)) {
+                                Boolean lastState = updateStates.get(obj);
+                                if (!lastState) {
+                                    //The object has been stale for an update already.
+                                    //Will get removed on next sync
+                                } else {
+                                    updateStates.put(obj.getName(), false); //Object is stale, but state will still get synced.
+                                }
                             }
                         }
-                    }
 
+                    }
                 }
             }
-        }
 
-        //Check for the last update time.
-        long currentTime = System.currentTimeMillis();
-        if (currentTime < lastUpdate + updateInterval) {
-            return;
-        }
-
-        //Perform sync
-        lastUpdate = currentTime;
-        //We need to only update objects that are near the client player.
-        for (HostedConnection c : clients()) {
-            //Update client relation if one exists
-            if (clientRelations.containsKey(c)) {
-                setLocation(c, clientRelations.get(c).getWorldTranslation());
+            //Check for the last update time.
+            long currentTime = System.currentTimeMillis();
+            if (currentTime < lastUpdate + updateInterval) {
+                return;
             }
-            //Find objects to sync
-            for (String objName : updateStates.keySet()) {
-                Spatial obj = objects.get(objName);
-                //Check distance
-                Vector3f clientPos = clients.get(c);
-                if (clientPos.equals(Vector3f.NAN) || syncDistance < 0 || clientPos.distance(obj.getWorldTranslation()) < syncDistance) {
 
-                    PhysicsSyncMessage syncMessage = new PhysicsSyncMessage(obj);
+            //Perform sync
+            lastUpdate = currentTime;
+            //We need to only update objects that are near the client player.
+            for (HostedConnection c : clients()) {
+                //Update client relation if one exists
+                if (clientRelations.containsKey(c)) {
+                    setLocation(c, clientRelations.get(c).getWorldTranslation());
+                }
+                //Find objects to sync
+                Stack<PhysicsStateData> data = new Stack<>();
+                for (String objName : updateStates.keySet()) {
+                    Spatial obj = objects.get(objName);
+                    //Check distance
+                    Vector3f clientPos = clients.get(c);
+                    if (clientPos.equals(Vector3f.NAN) || syncDistance < 0 || clientPos.distance(obj.getWorldTranslation()) < syncDistance) {
+                        PhysicsStateData stateData = new PhysicsStateData(obj);
+                        data.push(stateData);
+                    }
+                }
+                while (data.size() > 0) {
+                    int len = data.size() > PhysicsStateData.MAX_PACK ? PhysicsStateData.MAX_PACK : data.size();
+                    PhysicsStateData[] dataArray = new PhysicsStateData[len];
+                    for (int i = 0; i < len; i++) {
+                        dataArray[i] = data.pop();
+                    }
+                    PhysicsSyncMessage msg = new PhysicsSyncMessage();
+                    msg.setPhysicsData(dataArray);
                     try {
-                        c.send(syncMessage);
+                        c.send(msg);
                     } catch (Exception ex) {
-                        //If the client errors out and disconnects, but we are syncing before it is caught,
-                        //Then this error will occur, just ignore it.
+                        //This occurs when the client is no longer connected to the server.
+                        ex.printStackTrace();
                     }
                 }
             }
-        }
-        //Cleanup stale objects from update states
-        for (String objName : updateStates.keySet()) {
-            //Check if the state is stale
-            if (!updateStates.get(objName)) {
-                //Remove stale state
-                updateStates.remove(objName);
+            //Cleanup stale objects from update states
+            for (String objName : updateStates.keySet()) {
+                //Check if the state is stale
+                if (!updateStates.get(objName)) {
+                    //Remove stale state
+                    updateStates.remove(objName);
+                }
             }
         }
     }
@@ -371,6 +408,7 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
      * Must be call appropriately when network message registration needs to occur for your setup.
      */
     public void registerMessages() {
+        Serializer.registerClass(PhysicsStateData.class);
         Serializer.registerClass(PhysicsSyncMessage.class);
         Serializer.registerClass(PhysicsEchoMessage.class);
     }

@@ -62,9 +62,6 @@ public class TestClient extends SimpleApplication {
         // Add a simple box.
         Box b = new Box(1, 1, 1);
         boxGeometry = new Geometry("Box", b);
-        RigidBodyControl control = new RigidBodyControl( 1f );
-        boxGeometry.addControl(control);
-        control.setKinematic(true);
 
         Material mat = new Material(assetManager, "Common/MatDefs/Light/PBRLighting.j3md");
         mat.setColor("BaseColor", ColorRGBA.Blue);

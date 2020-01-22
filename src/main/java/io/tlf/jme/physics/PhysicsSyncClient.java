@@ -37,13 +37,15 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
     public void messageReceived(Client source, Message m) {
         if (m instanceof PhysicsSyncMessage) {
             app.enqueue(() -> {
-                Spatial obj = app.getRootNode().getChild(((PhysicsSyncMessage) m).getSpatial());
-                PhysicsControl control = obj.getControl(PhysicsControl.class);
-                if (control == null) { //Client is not performing physics on the object
-                    obj.setLocalTranslation(((PhysicsSyncMessage) m).getLocation());
-                    obj.setLocalRotation(((PhysicsSyncMessage) m).getRotation());
-                } else {
-                    //The client is performing physics on the object. We will ignore it.
+                for (PhysicsStateData state : ((PhysicsSyncMessage) m).getPhysicsData()) {
+                    Spatial obj = app.getRootNode().getChild(state.getSpatial());
+                    PhysicsControl control = obj.getControl(PhysicsControl.class);
+                    if (control == null) { //Client is not performing physics on the object
+                        obj.setLocalTranslation(state.getLocation());
+                        obj.setLocalRotation(state.getRotation());
+                    } else {
+                        //The client is performing physics on the object. We will ignore it.
+                    }
                 }
             });
         }

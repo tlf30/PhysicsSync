@@ -108,6 +108,8 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
                                 interpObj.obj = obj;
                                 interpObj.targetPos = state.getLocation();
                                 interpObj.targetRot = state.getRotation();
+                                interpObj.startPos = obj.getLocalTranslation();
+                                interpObj.startRot = obj.getLocalRotation();
 
                                 //Check if we are still interpolating, if so move the object to where it should be by now
                                 /*if (interpData.containsKey(state.getSpatial())) {
@@ -138,7 +140,9 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
         public float delta;
         public float current;
         public Vector3f targetPos;
+        public Vector3f startPos;
         public Quaternion targetRot;
+        public Quaternion startRot;
         public Spatial obj;
 
         public boolean update(float tpf) {
@@ -150,26 +154,12 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
                 System.out.println("Interp complete");
                 return true;
             } else {
-                obj.setLocalTranslation(obj.getLocalTranslation().interpolateLocal(targetPos, percentInterp));
-                obj.setLocalRotation(lerp(obj.getLocalRotation(), targetRot, percentInterp));
+                obj.setLocalTranslation(startPos.interpolateLocal(targetPos, percentInterp));
+                obj.setLocalRotation(new Quaternion().slerp(startRot, targetRot, percentInterp));
                 System.out.println("Interp updated " + percentInterp + " = " + current + " / " + delta + ". TPF: " + tpf * 1000);
                 return false;
             }
 
-        }
-
-        private Quaternion lerp(Quaternion q0, Quaternion q1, float t) {
-            float[] f0 = q0.toAngles(null);
-            float[] f1 = q1.toAngles(null);
-            float[] f2 = new float[3];
-            f2[0] = lerp(f0[0], f1[0], t);
-            f2[1] = lerp(f0[1], f1[1], t);
-            f2[2] = lerp(f0[2], f1[2], t);
-            return new Quaternion(f2);
-        }
-
-        private float lerp(float v0, float v1, float t) {
-            return (1 - t) * v0 + t * v1;
         }
     }
 }

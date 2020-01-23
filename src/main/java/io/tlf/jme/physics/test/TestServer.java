@@ -74,9 +74,19 @@ public class TestServer extends SimpleApplication implements ConnectionListener 
         System.out.println("Server Running");
     }
 
+    private boolean direction = true;
+
     @Override
     public void simpleUpdate(float tpf) {
         boxGeometry.rotate(0, tpf * 2f, 0);
+        float y = boxGeometry.getLocalTranslation().y + tpf * 5;
+        if (boxGeometry.getLocalTranslation().y > 5) {
+            direction = false;
+        } else if (boxGeometry.getLocalTranslation().y < 1f) {
+            direction = true;
+        }
+        y = boxGeometry.getLocalTranslation().y + tpf * (direction ? 1f : -1f);
+        boxGeometry.setLocalTranslation(0,  y, 0);
     }
 
     @Override

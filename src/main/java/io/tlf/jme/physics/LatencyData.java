@@ -1,7 +1,6 @@
 package io.tlf.jme.physics;
 
 import java.util.LinkedList;
-import java.util.Queue;
 
 public class LatencyData {
 

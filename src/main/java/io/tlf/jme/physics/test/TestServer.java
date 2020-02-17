@@ -43,8 +43,10 @@ public class TestServer extends SimpleApplication implements ConnectionListener 
         System.out.println("Server Loading");
         //Configure Physics
         bulletAppState = new BulletAppState();
+        bulletAppState.setThreadingType(BulletAppState.ThreadingType.PARALLEL); //<-- Causes NPE
         stateManager.attach(bulletAppState);
         bulletAppState.setDebugEnabled(true);
+
         physicsSync = new PhysicsSyncServer(bulletAppState);
         stateManager.attach(physicsSync);
 

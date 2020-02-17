@@ -13,7 +13,6 @@ import com.jme3.scene.Spatial;
 
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 
 public class PhysicsSyncClient extends BaseAppState implements MessageListener<Client> {
 
@@ -23,8 +22,8 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
     private Object lock = new Object();
     private boolean loaded = false;
     //Interpolation Values
-    private float interpMaxDistance = 5f;
-    private float interpMaxRot = 180f; //Degrees
+    private float interpMaxDistance = 1f;
+    private float interpMaxRot = 90f; //Degrees
     private long interpMaxDelay = 100; //milliseconds
     private boolean interp = true;
     private HashMap<String, InterpData> interpData = new HashMap<>();
@@ -55,7 +54,6 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
             }
 
             if (interp) {
-                System.out.println("Interp queue: " + interpData.size());
                 for (InterpData data : Collections.unmodifiableCollection(interpData.values())) {
                     if (data.update(tpf)) {
                         interpData.remove(data);
@@ -119,11 +117,9 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
                                     System.out.println("Rapid update, forced sync");
                                 }*/
                                 interpData.put(state.getSpatial(), interpObj);
-                                System.out.println("Added interp data");
                             } else {
                                 obj.setLocalTranslation(state.getLocation());
                                 obj.setLocalRotation(state.getRotation());
-                                System.out.println("Warped obj");
                             }
                         } else {
                             //The client is performing physics on the object. We will ignore it.
@@ -151,12 +147,10 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
             if (percentInterp >= 1f) {
                 obj.setLocalTranslation(targetPos);
                 obj.setLocalRotation(targetRot);
-                System.out.println("Interp complete");
                 return true;
             } else {
                 obj.setLocalTranslation(startPos.interpolateLocal(targetPos, percentInterp));
                 obj.setLocalRotation(new Quaternion().slerp(startRot, targetRot, percentInterp));
-                System.out.println("Interp updated " + percentInterp + " = " + current + " / " + delta + ". TPF: " + tpf * 1000);
                 return false;
             }
 

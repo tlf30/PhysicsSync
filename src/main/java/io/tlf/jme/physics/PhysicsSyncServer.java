@@ -11,9 +11,11 @@ import com.jme3.math.Vector3f;
 import com.jme3.network.HostedConnection;
 import com.jme3.network.Message;
 import com.jme3.network.MessageListener;
-import com.jme3.network.serializing.Serializable;
 import com.jme3.network.serializing.Serializer;
 import com.jme3.scene.Spatial;
+import io.tlf.jme.physics.msg.PhysicsEchoMessage;
+import io.tlf.jme.physics.msg.PhysicsSyncMessage;
+import io.tlf.jme.physics.msg.PhysicsSyncObjMessage;
 
 import java.util.*;
 
@@ -26,11 +28,14 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
     private volatile long updateInterval = 50; //in milliseconds
     private volatile long echoInterval = 100; //in milliseconds
     private volatile float syncDistance = 100f;
-    private HashMap<String, Boolean> updateStates = new HashMap<>();
-    private HashMap<String, Spatial> objects = new HashMap<>();
+    private HashMap<Long, Boolean> updateStates = new HashMap<>();
+    private HashMap<Long, Spatial> objects = new HashMap<>();
+    private HashMap<String, Long> objCrossRef = new HashMap<>();
     private HashMap<HostedConnection, Vector3f> clients = new HashMap<>();
     private HashMap<HostedConnection, Spatial> clientRelations = new HashMap<>();
     private HashMap<HostedConnection, LatencyData> clientLatency = new HashMap<>();
+    private LinkedList<Spatial> addQueue = new LinkedList<>();
+    private LinkedList<Spatial> removeQueue = new LinkedList<>();
     private final Object lock = new Object();
     private BulletAppState physics;
 
@@ -49,8 +54,12 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
             if (s.getControl(PhysicsControl.class) != null) {
                 PhysicsControl control = s.getControl(PhysicsControl.class);
                 physics.getPhysicsSpace().add(control);
-                updateStates.put(s.getName(), true);
-                objects.put(s.getName(), s);
+                if (control instanceof PhysicsRigidBody) {
+                    updateStates.put(((PhysicsRigidBody) control).getObjectId(), true);
+                    objects.put(((PhysicsRigidBody) control).getObjectId(), s);
+                    objCrossRef.put(s.getName(), ((PhysicsRigidBody) control).getObjectId());
+                }
+                addQueue.push(s);
             }
         }
     }
@@ -68,6 +77,7 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
             }
             updateStates.remove(s.getName());
             objects.remove(s.getName());
+            removeQueue.push(s);
         }
     }
 
@@ -90,6 +100,35 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
         synchronized (lock) {
             clients.put(c, Vector3f.NAN.clone());
             clientLatency.put(c, new LatencyData());
+            //Send object info
+            Stack<String> names = new Stack<>();
+            Stack<Long> ids = new Stack<>();
+            Stack<Boolean> remove = new Stack<>();
+
+            for (Long id : objects.keySet()) {
+                String name = objects.get(id).getName();
+                names.push(name);
+                ids.push(id);
+                remove.push(false);
+            }
+
+            while (names.size() > 0) {
+                int len = names.size() > PhysicsSyncObjMessage.MAX_PACK ? PhysicsSyncObjMessage.MAX_PACK : names.size();
+                String[] namesBatch = new String[len];
+                long[] idsBatch = new long[len];
+                boolean[] removeBatch = new boolean[len];
+                for (int i = 0; i < len; i++) {
+                    namesBatch[i] = names.pop();
+                    idsBatch[i] = ids.pop();
+                    removeBatch[i] = remove.pop();
+                }
+                PhysicsSyncObjMessage objMessage = new PhysicsSyncObjMessage();
+                objMessage.setName(namesBatch);
+                objMessage.setId(idsBatch);
+                objMessage.setRemove(removeBatch);
+                //Send to all clients
+                c.send(objMessage);
+            }
         }
     }
 
@@ -393,8 +432,9 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
                 if (obj.getControl(PhysicsControl.class) != null) {
                     PhysicsControl control = obj.getControl(PhysicsControl.class);
                     if (control instanceof PhysicsRigidBody) {
+                        ((PhysicsRigidBody) control).getObjectId();
                         if (((PhysicsRigidBody) control).isActive()) {
-                            updateStates.put(obj.getName(), true); //Object state is active, and needs to be updated.
+                            updateStates.put(((PhysicsRigidBody) control).getObjectId(), true); //Object state is active, and needs to be updated.
                         } else {
                             if (updateStates.containsKey(obj)) {
                                 Boolean lastState = updateStates.get(obj);
@@ -402,7 +442,7 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
                                     //The object has been stale for an update already.
                                     //Will get removed on next sync
                                 } else {
-                                    updateStates.put(obj.getName(), false); //Object is stale, but state will still get synced.
+                                    updateStates.put(((PhysicsRigidBody) control).getObjectId(), false); //Object is stale, but state will still get synced.
                                 }
                             }
                         }
@@ -431,6 +471,45 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
             if (currentTime > lastUpdate + updateInterval) {
                 //Perform sync
                 lastUpdate = currentTime;
+
+                //Send object info
+                Stack<String> names = new Stack<>();
+                Stack<Long> ids = new Stack<>();
+                Stack<Boolean> remove = new Stack<>();
+                int index = 0;
+                while (addQueue.size() > 0) {
+                    String name = addQueue.pop().getName();
+                    names.push(name);
+                    ids.push(objCrossRef.get(name));
+                    remove.push(false);
+                }
+                while (removeQueue.size() > 0) {
+                    String name = removeQueue.pop().getName();
+                    names.push(name);
+                    ids.push(objCrossRef.get(name));
+                    remove.push(true);
+                }
+
+                while (names.size() > 0) {
+                    int len = names.size() > PhysicsSyncObjMessage.MAX_PACK ? PhysicsSyncObjMessage.MAX_PACK : names.size();
+                    String[] namesBatch = new String[len];
+                    long[] idsBatch = new long[len];
+                    boolean[] removeBatch = new boolean[len];
+                    for (int i = 0; i < len; i++) {
+                        namesBatch[i] = names.pop();
+                        idsBatch[i] = ids.pop();
+                        removeBatch[i] = remove.pop();
+                    }
+                    PhysicsSyncObjMessage objMessage = new PhysicsSyncObjMessage();
+                    objMessage.setName(namesBatch);
+                    objMessage.setId(idsBatch);
+                    objMessage.setRemove(removeBatch);
+                    //Send to all clients
+                    for (HostedConnection c : clients()) {
+                        c.send(objMessage);
+                    }
+                }
+
                 //We need to only update objects that are near the client player.
                 for (HostedConnection c : clients()) {
                     //Update client relation if one exists
@@ -439,17 +518,19 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
                     }
                     //Find objects to sync
                     Stack<PhysicsStateData> data = new Stack<>();
-                    for (String objName : updateStates.keySet()) {
-                        Spatial obj = objects.get(objName);
+                    for (Long objId : updateStates.keySet()) {
+                        Spatial obj = objects.get(objId);
                         //Check distance
                         Vector3f clientPos = clients.get(c);
                         if (clientPos.equals(Vector3f.NAN) || syncDistance < 0 || clientPos.distance(obj.getWorldTranslation()) < syncDistance) {
-                            PhysicsStateData stateData = new PhysicsStateData(obj);
+                            PhysicsStateData stateData = new PhysicsStateData(objCrossRef.get(obj.getName()), obj.getLocalTranslation(), obj.getLocalRotation());
                             data.push(stateData);
                         }
                     }
+
+                    //Send updates
                     while (data.size() > 0) {
-                        int len = data.size() > PhysicsStateData.MAX_PACK ? PhysicsStateData.MAX_PACK : data.size();
+                        int len = data.size() > PhysicsSyncMessage.MAX_PACK ? PhysicsSyncMessage.MAX_PACK : data.size();
                         PhysicsStateData[] dataArray = new PhysicsStateData[len];
                         for (int i = 0; i < len; i++) {
                             dataArray[i] = data.pop();
@@ -464,12 +545,13 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
                         }
                     }
                 }
+
                 //Cleanup stale objects from update states
-                for (String objName : updateStates.keySet()) {
+                for (Long objId : updateStates.keySet()) {
                     //Check if the state is stale
-                    if (!updateStates.get(objName)) {
+                    if (!updateStates.get(objId)) {
                         //Remove stale state
-                        updateStates.remove(objName);
+                        updateStates.remove(objId);
                     }
                 }
             }
@@ -499,5 +581,6 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
         Serializer.registerClass(PhysicsStateData.class);
         Serializer.registerClass(PhysicsSyncMessage.class);
         Serializer.registerClass(PhysicsEchoMessage.class);
+        Serializer.registerClass(PhysicsSyncObjMessage.class);
     }
 }

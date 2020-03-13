@@ -10,6 +10,9 @@ import com.jme3.network.Client;
 import com.jme3.network.Message;
 import com.jme3.network.MessageListener;
 import com.jme3.scene.Spatial;
+import io.tlf.jme.physics.msg.PhysicsEchoMessage;
+import io.tlf.jme.physics.msg.PhysicsSyncMessage;
+import io.tlf.jme.physics.msg.PhysicsSyncObjMessage;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -17,7 +20,7 @@ import java.util.HashMap;
 public class PhysicsSyncClient extends BaseAppState implements MessageListener<Client> {
 
     private SimpleApplication app;
-    private HashMap<String, Long> timestamps = new HashMap<>();
+    private HashMap<Long, Long> timestamps = new HashMap<>();
     private long counter = 0;
     private Object lock = new Object();
     private boolean loaded = false;
@@ -26,7 +29,8 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
     private float interpMaxRot = 90f; //Degrees
     private long interpMaxDelay = 100; //milliseconds
     private boolean interp = true;
-    private HashMap<String, InterpData> interpData = new HashMap<>();
+    private HashMap<Long, InterpData> interpData = new HashMap<>();
+    private HashMap<Long, String> crossRefList = new HashMap<>();
 
     @Override
     protected void initialize(Application app) {
@@ -46,7 +50,7 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
             if (counter > 60000) { //We do not need to check this very often, mostly just for cleanup so our hashmap does not get too large.
                 counter = 0;
                 long current = System.currentTimeMillis();
-                for (String key : Collections.unmodifiableCollection(timestamps.keySet())) {
+                for (Long key : Collections.unmodifiableCollection(timestamps.keySet())) {
                     if (timestamps.get(key) + 60000 < current) { //We have not received updates for over a minute.
                         timestamps.remove(key); //Remove the timestamp entry.
                     }
@@ -84,13 +88,13 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
             synchronized (lock) {
                 app.enqueue(() -> {
                     for (PhysicsStateData state : ((PhysicsSyncMessage) m).getPhysicsData()) {
-                        long lastUpdate = timestamps.containsKey(state.getSpatial()) ? timestamps.get(state.getSpatial()) : -1;
+                        long lastUpdate = timestamps.containsKey(state.getId()) ? timestamps.get(state.getId()) : -1;
                         if (lastUpdate > ((PhysicsSyncMessage) m).getTimestamp()) {
                             continue; //This is an old message
                         } else {
-                            timestamps.put(state.getSpatial(), ((PhysicsSyncMessage) m).getTimestamp());
+                            timestamps.put(state.getId(), ((PhysicsSyncMessage) m).getTimestamp());
                         }
-                        Spatial obj = app.getRootNode().getChild(state.getSpatial());
+                        Spatial obj = app.getRootNode().getChild(crossRefList.get((state.getId())));
                         PhysicsControl control = obj.getControl(PhysicsControl.class);
                         long updateDelay = ((PhysicsSyncMessage) m).getTimestamp() - lastUpdate;
                         float updateDistance = obj.getLocalTranslation().distance(state.getLocation());
@@ -109,14 +113,7 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
                                 interpObj.startPos = obj.getLocalTranslation();
                                 interpObj.startRot = obj.getLocalRotation();
 
-                                //Check if we are still interpolating, if so move the object to where it should be by now
-                                /*if (interpData.containsKey(state.getSpatial())) {
-                                    InterpData d = interpData.get(state.getSpatial());
-                                    obj.setLocalTranslation(d.targetPos);
-                                    obj.setLocalRotation(d.targetRot);
-                                    System.out.println("Rapid update, forced sync");
-                                }*/
-                                interpData.put(state.getSpatial(), interpObj);
+                                interpData.put(state.getId(), interpObj);
                             } else {
                                 obj.setLocalTranslation(state.getLocation());
                                 obj.setLocalRotation(state.getRotation());
@@ -126,6 +123,18 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
                         }
                     }
                 });
+            }
+        } else if (m instanceof PhysicsSyncObjMessage) {
+            for (int i = 0; i < ((PhysicsSyncObjMessage) m).getName().length; i++) {
+                boolean rem = ((PhysicsSyncObjMessage) m).getRemove()[i];
+                String name = ((PhysicsSyncObjMessage) m).getName()[i];
+                long id = ((PhysicsSyncObjMessage) m).getId()[i];
+
+                if (rem) {
+                    crossRefList.remove(id);
+                } else {
+                    crossRefList.put(id, name);
+                }
             }
         } else if (m instanceof PhysicsEchoMessage) { //Echo
             source.send(m); //Echo message back

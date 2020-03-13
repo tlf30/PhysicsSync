@@ -1,5 +1,7 @@
 package io.tlf.jme.physics;
 
+import io.tlf.jme.physics.msg.PhysicsEchoMessage;
+
 import java.util.LinkedList;
 
 public class LatencyData {

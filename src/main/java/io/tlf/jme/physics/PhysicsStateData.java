@@ -3,27 +3,21 @@ package io.tlf.jme.physics;
 import com.jme3.math.Quaternion;
 import com.jme3.math.Vector3f;
 import com.jme3.network.serializing.Serializable;
-import com.jme3.scene.Spatial;
 
 @Serializable
 public class PhysicsStateData {
-    /**
-     * Maximum number of object that can be placed in a UDP packet
-     */
-    public static final int MAX_PACK = 500;
-
     private Vector3f location;
     private Quaternion rotation;
-    private String spatial;
+    private long id;
 
     public PhysicsStateData() {
 
     }
 
-    public PhysicsStateData(Spatial s) {
-        location = s.getLocalTranslation();
-        rotation = s.getLocalRotation();
-        spatial = s.getName();
+    public PhysicsStateData(Long id, Vector3f pos, Quaternion rot) {
+        location = pos;
+        rotation = rot;
+        this.id = id;
     }
 
     public Vector3f getLocation() {
@@ -42,11 +36,11 @@ public class PhysicsStateData {
         this.rotation = rotation;
     }
 
-    public String getSpatial() {
-        return spatial;
+    public Long getId() {
+        return id;
     }
 
-    public void setSpatial(String spatial) {
-        this.spatial = spatial;
+    public void setId(Long id) {
+        this.id = id;
     }
 }

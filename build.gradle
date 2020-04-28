@@ -4,7 +4,7 @@ sourceCompatibility = '1.8'
 targetCompatibility = '1.8'
 
 group 'io.tlf.jme'
-version '0.1.0'
+version '0.2.0'
 
 repositories {
     jcenter()
@@ -12,7 +12,7 @@ repositories {
 }
 
 project.ext {
-    jmeVer = '3.3.0-stable'
+    jmeVer = '3.3.2-stable'
 }
 
 dependencies {

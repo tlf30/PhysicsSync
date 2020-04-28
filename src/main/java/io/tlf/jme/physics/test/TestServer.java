@@ -55,6 +55,7 @@ public class TestServer extends SimpleApplication implements ConnectionListener 
             Server myServer = Network.createServer(6143);
             physicsSync.registerMessages();
             myServer.addConnectionListener(this);
+            myServer.addMessageListener(physicsSync);
             myServer.start();
         } catch (IOException e) {
             e.printStackTrace();

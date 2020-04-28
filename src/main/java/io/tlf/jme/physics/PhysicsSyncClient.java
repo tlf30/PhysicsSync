@@ -4,15 +4,17 @@ import com.jme3.app.Application;
 import com.jme3.app.SimpleApplication;
 import com.jme3.app.state.BaseAppState;
 import com.jme3.bullet.control.PhysicsControl;
+import com.jme3.material.Material;
+import com.jme3.math.ColorRGBA;
 import com.jme3.math.Quaternion;
 import com.jme3.math.Vector3f;
 import com.jme3.network.Client;
 import com.jme3.network.Message;
 import com.jme3.network.MessageListener;
+import com.jme3.scene.Geometry;
+import com.jme3.scene.Node;
 import com.jme3.scene.Spatial;
-import io.tlf.jme.physics.msg.PhysicsEchoMessage;
-import io.tlf.jme.physics.msg.PhysicsSyncMessage;
-import io.tlf.jme.physics.msg.PhysicsSyncObjMessage;
+import io.tlf.jme.physics.msg.*;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -31,6 +33,10 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
     private boolean interp = true;
     private HashMap<Long, InterpData> interpData = new HashMap<>();
     private HashMap<Long, String> crossRefList = new HashMap<>();
+    //Debug vars
+    private Node debugNode = new Node("physics-sync-debug");
+    private boolean debug = false;
+    private boolean debugUpdateMessage = false;
 
     @Override
     protected void initialize(Application app) {
@@ -45,6 +51,16 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
     @Override
     public void update(float tpf) {
         counter += tpf;
+
+        if (debug) {
+            if (!this.app.getRootNode().hasChild(debugNode)) {
+                this.app.getRootNode().attachChild(debugNode);
+            }
+        } else {
+            if (this.app.getRootNode().hasChild(debugNode)) {
+                debugNode.removeFromParent();
+            }
+        }
 
         synchronized (lock) { //Prevent network message from modifying update state info during processing the info
             if (counter > 60000) { //We do not need to check this very often, mostly just for cleanup so our hashmap does not get too large.
@@ -95,15 +111,16 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
                             timestamps.put(state.getId(), ((PhysicsSyncMessage) m).getTimestamp());
                         }
                         Spatial obj = app.getRootNode().getChild(crossRefList.get((state.getId())));
+                        if (obj == null) {
+                            continue; //If we cannot find the spatial, skip it
+                        }
                         PhysicsControl control = obj.getControl(PhysicsControl.class);
                         long updateDelay = ((PhysicsSyncMessage) m).getTimestamp() - lastUpdate;
-                        float updateDistance = obj.getLocalTranslation().distance(state.getLocation());
-                        float updateAngle = (float) (Math.acos(obj.getLocalRotation().dot(state.getRotation())) * 2.0);
 
                         if (control == null) { //Client is not performing physics on the object
                             //If interpolation is enabled, and the last update we got was recent enough
                             //Also checking distanced moved and amount rotated
-                            if (interp && updateDelay < interpMaxDelay && updateDistance < interpMaxDistance && updateAngle < interpMaxRot) {
+                            if (interp) {
                                 InterpData interpObj = new InterpData();
                                 interpObj.delta = (float) updateDelay;
                                 interpObj.current = 0f;
@@ -112,11 +129,8 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
                                 interpObj.targetRot = state.getRotation();
                                 interpObj.startPos = obj.getLocalTranslation();
                                 interpObj.startRot = obj.getLocalRotation();
-
+                                interpObj.id = state.getId();
                                 interpData.put(state.getId(), interpObj);
-                            } else {
-                                obj.setLocalTranslation(state.getLocation());
-                                obj.setLocalRotation(state.getRotation());
                             }
                         } else {
                             //The client is performing physics on the object. We will ignore it.
@@ -138,7 +152,32 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
             }
         } else if (m instanceof PhysicsEchoMessage) { //Echo
             source.send(m); //Echo message back
+            //Check if we need to send a physics debug enable message
+            if (debugUpdateMessage) {
+                PhysicsDebugEnableMessage debugEnableMessage = new PhysicsDebugEnableMessage(debug);
+                source.send(debugEnableMessage);
+                debugUpdateMessage = false;
+            }
+        } else if (m instanceof PhysicsDebugMessage) {
+            DebugData dd = ((PhysicsDebugMessage) m).getData();
+            app.enqueue(() -> {
+                Geometry geo = (Geometry) debugNode.getChild(Long.toString(dd.id));
+                if (geo == null) {
+                    geo = new Geometry(Long.toString(dd.id));
+                    debugNode.attachChild(geo);
+                }
+                geo.setMesh(dd.mesh);
+                Material debugMat = new Material(app.getAssetManager(), "Common/MatDefs/Misc/Unshaded.j3md");
+                debugMat.setColor("Color", ColorRGBA.Blue);
+                debugMat.getAdditionalRenderState().setWireframe(true);
+                geo.setMaterial(debugMat);
+            });
         }
+    }
+
+    public void setPhysicsDebugging(boolean enabled) {
+        this.debug = enabled;
+        this.debugUpdateMessage = true;
     }
 
     private class InterpData {
@@ -149,20 +188,36 @@ public class PhysicsSyncClient extends BaseAppState implements MessageListener<C
         public Quaternion targetRot;
         public Quaternion startRot;
         public Spatial obj;
+        public long id;
 
         public boolean update(float tpf) {
-            current += tpf * 1000;
-            float percentInterp = current / delta;
-            if (percentInterp >= 1f) {
+            boolean interpComplete = false;
+            float updateDistance = obj.getLocalTranslation().distance(targetPos);
+            float updateAngle = (float) (Math.acos(obj.getLocalRotation().dot(targetRot)) * 2.0);
+            if (delta < interpMaxDelay && updateDistance < interpMaxDistance && updateAngle < interpMaxRot) {
+                current += tpf * 1000;
+                float percentInterp = current / delta;
+                if (percentInterp >= 1f) {
+                    obj.setLocalTranslation(targetPos);
+                    obj.setLocalRotation(targetRot);
+                    interpComplete = true;
+                } else {
+                    obj.setLocalTranslation(startPos.interpolateLocal(targetPos, percentInterp));
+                    obj.setLocalRotation(new Quaternion().slerp(startRot, targetRot, percentInterp));
+                }
+            } else {
                 obj.setLocalTranslation(targetPos);
                 obj.setLocalRotation(targetRot);
-                return true;
-            } else {
-                obj.setLocalTranslation(startPos.interpolateLocal(targetPos, percentInterp));
-                obj.setLocalRotation(new Quaternion().slerp(startRot, targetRot, percentInterp));
-                return false;
+                interpComplete = true;
             }
-
+            if (debug) {
+                Spatial debugGeo = debugNode.getChild(Long.toString(id));
+                if (debugGeo != null) {
+                    debugGeo.setLocalRotation(obj.getLocalRotation());
+                    debugGeo.setLocalTranslation(obj.getLocalTranslation());
+                }
+            }
+            return interpComplete;
         }
     }
 }

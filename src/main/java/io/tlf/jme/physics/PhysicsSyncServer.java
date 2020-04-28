@@ -7,15 +7,16 @@ import com.jme3.bullet.PhysicsSpace;
 import com.jme3.bullet.PhysicsTickListener;
 import com.jme3.bullet.control.PhysicsControl;
 import com.jme3.bullet.objects.PhysicsRigidBody;
+import com.jme3.bullet.util.DebugShapeFactory;
+import com.jme3.material.Material;
 import com.jme3.math.Vector3f;
 import com.jme3.network.HostedConnection;
 import com.jme3.network.Message;
 import com.jme3.network.MessageListener;
 import com.jme3.network.serializing.Serializer;
+import com.jme3.scene.Mesh;
 import com.jme3.scene.Spatial;
-import io.tlf.jme.physics.msg.PhysicsEchoMessage;
-import io.tlf.jme.physics.msg.PhysicsSyncMessage;
-import io.tlf.jme.physics.msg.PhysicsSyncObjMessage;
+import io.tlf.jme.physics.msg.*;
 
 import java.util.*;
 
@@ -31,9 +32,11 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
     private HashMap<Long, Boolean> updateStates = new HashMap<>();
     private HashMap<Long, Spatial> objects = new HashMap<>();
     private HashMap<String, Long> objCrossRef = new HashMap<>();
+    private HashMap<Long, DebugData> objDebug = new HashMap<>();
     private HashMap<HostedConnection, Vector3f> clients = new HashMap<>();
     private HashMap<HostedConnection, Spatial> clientRelations = new HashMap<>();
     private HashMap<HostedConnection, LatencyData> clientLatency = new HashMap<>();
+    private HashSet<HostedConnection> debugClients = new HashSet<>();
     private LinkedList<Spatial> addQueue = new LinkedList<>();
     private LinkedList<Spatial> removeQueue = new LinkedList<>();
     private final Object lock = new Object();
@@ -59,6 +62,7 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
                     objects.put(((PhysicsRigidBody) control).getObjectId(), s);
                     objCrossRef.put(s.getName(), ((PhysicsRigidBody) control).getObjectId());
                 }
+                updateDebug(control);
                 addQueue.push(s);
             }
         }
@@ -75,6 +79,7 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
                 PhysicsControl control = s.getControl(PhysicsControl.class);
                 physics.getPhysicsSpace().remove(control);
             }
+            objDebug.remove(objCrossRef.get(s.getName()));
             updateStates.remove(s.getName());
             objects.remove(s.getName());
             removeQueue.push(s);
@@ -446,7 +451,6 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
                                 }
                             }
                         }
-
                     }
                 }
             }
@@ -487,6 +491,7 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
                     String name = removeQueue.pop().getName();
                     names.push(name);
                     ids.push(objCrossRef.get(name));
+                    objCrossRef.remove(name);
                     remove.push(true);
                 }
 
@@ -546,6 +551,9 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
                     }
                 }
 
+                //Send debugging
+                broadcastDebug();
+
                 //Cleanup stale objects from update states
                 for (Long objId : updateStates.keySet()) {
                     //Check if the state is stale
@@ -570,6 +578,12 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
             if (clientLatency.containsKey(source)) {
                 clientLatency.get(source).add((PhysicsEchoMessage) m);
             }
+        } else if (m instanceof PhysicsDebugEnableMessage) {
+            if (((PhysicsDebugEnableMessage) m).isEnabled()) {
+                debugClients.add(source);
+            } else {
+                debugClients.remove(source);
+            }
         }
     }
 
@@ -582,5 +596,34 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
         Serializer.registerClass(PhysicsSyncMessage.class);
         Serializer.registerClass(PhysicsEchoMessage.class);
         Serializer.registerClass(PhysicsSyncObjMessage.class);
+        Serializer.registerClass(PhysicsDebugMessage.class);
+        Serializer.registerClass(PhysicsDebugEnableMessage.class);
+    }
+
+    private void updateDebug(PhysicsControl control) {
+        if (control instanceof PhysicsRigidBody) {
+            Material debugMat = ((PhysicsRigidBody) control).getDebugMaterial();
+            Mesh debugMesh = DebugShapeFactory.getDebugMesh(((PhysicsRigidBody) control).getCollisionShape());
+            DebugData dd = objDebug.get(((PhysicsRigidBody) control).getObjectId());
+            if (dd == null) {
+                dd = new DebugData();
+                objDebug.put(((PhysicsRigidBody) control).getObjectId(), dd);
+            }
+            //dd.mat = debugMat;
+            dd.mesh = debugMesh;
+            dd.id = ((PhysicsRigidBody) control).getObjectId();
+        }
+    }
+
+    private void broadcastDebug() {
+        if (debugClients.size() < 1) {
+            return;
+        }
+        for (DebugData dd : objDebug.values()) {
+            PhysicsDebugMessage debugMessage = new PhysicsDebugMessage(dd);
+            for (HostedConnection conn : debugClients) {
+                conn.send(debugMessage);
+            }
+        }
     }
 }

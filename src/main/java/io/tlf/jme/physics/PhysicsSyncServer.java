@@ -5,8 +5,8 @@ import com.jme3.app.state.BaseAppState;
 import com.jme3.bullet.BulletAppState;
 import com.jme3.bullet.PhysicsSpace;
 import com.jme3.bullet.PhysicsTickListener;
+import com.jme3.bullet.collision.PhysicsCollisionObject;
 import com.jme3.bullet.control.PhysicsControl;
-import com.jme3.bullet.objects.PhysicsRigidBody;
 import com.jme3.bullet.util.DebugShapeFactory;
 import com.jme3.material.Material;
 import com.jme3.math.Vector3f;
@@ -57,10 +57,10 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
             if (s.getControl(PhysicsControl.class) != null) {
                 PhysicsControl control = s.getControl(PhysicsControl.class);
                 physics.getPhysicsSpace().add(control);
-                if (control instanceof PhysicsRigidBody) {
-                    updateStates.put(((PhysicsRigidBody) control).getObjectId(), true);
-                    objects.put(((PhysicsRigidBody) control).getObjectId(), s);
-                    objCrossRef.put(s.getName(), ((PhysicsRigidBody) control).getObjectId());
+                if (control instanceof PhysicsCollisionObject) {
+                    updateStates.put(((PhysicsCollisionObject) control).getObjectId(), true);
+                    objects.put(((PhysicsCollisionObject) control).getObjectId(), s);
+                    objCrossRef.put(s.getName(), ((PhysicsCollisionObject) control).getObjectId());
                 }
                 updateDebug(control);
                 addQueue.push(s);
@@ -436,10 +436,10 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
             for (Spatial obj : objects()) {
                 if (obj.getControl(PhysicsControl.class) != null) {
                     PhysicsControl control = obj.getControl(PhysicsControl.class);
-                    if (control instanceof PhysicsRigidBody) {
-                        ((PhysicsRigidBody) control).getObjectId();
-                        if (((PhysicsRigidBody) control).isActive()) {
-                            updateStates.put(((PhysicsRigidBody) control).getObjectId(), true); //Object state is active, and needs to be updated.
+                    if (control instanceof PhysicsCollisionObject) {
+                        ((PhysicsCollisionObject) control).getObjectId();
+                        if (((PhysicsCollisionObject) control).isActive()) {
+                            updateStates.put(((PhysicsCollisionObject) control).getObjectId(), true); //Object state is active, and needs to be updated.
                         } else {
                             if (updateStates.containsKey(obj)) {
                                 Boolean lastState = updateStates.get(obj);
@@ -447,7 +447,7 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
                                     //The object has been stale for an update already.
                                     //Will get removed on next sync
                                 } else {
-                                    updateStates.put(((PhysicsRigidBody) control).getObjectId(), false); //Object is stale, but state will still get synced.
+                                    updateStates.put(((PhysicsCollisionObject) control).getObjectId(), false); //Object is stale, but state will still get synced.
                                 }
                             }
                         }
@@ -601,17 +601,17 @@ public class PhysicsSyncServer extends BaseAppState implements PhysicsTickListen
     }
 
     private void updateDebug(PhysicsControl control) {
-        if (control instanceof PhysicsRigidBody) {
-            Material debugMat = ((PhysicsRigidBody) control).getDebugMaterial();
-            Mesh debugMesh = DebugShapeFactory.getDebugMesh(((PhysicsRigidBody) control).getCollisionShape());
-            DebugData dd = objDebug.get(((PhysicsRigidBody) control).getObjectId());
+        if (control instanceof PhysicsCollisionObject) {
+            Material debugMat = ((PhysicsCollisionObject) control).getDebugMaterial();
+            Mesh debugMesh = DebugShapeFactory.getDebugMesh(((PhysicsCollisionObject) control).getCollisionShape());
+            DebugData dd = objDebug.get(((PhysicsCollisionObject) control).getObjectId());
             if (dd == null) {
                 dd = new DebugData();
-                objDebug.put(((PhysicsRigidBody) control).getObjectId(), dd);
+                objDebug.put(((PhysicsCollisionObject) control).getObjectId(), dd);
             }
             //dd.mat = debugMat;
             dd.mesh = debugMesh;
-            dd.id = ((PhysicsRigidBody) control).getObjectId();
+            dd.id = ((PhysicsCollisionObject) control).getObjectId();
         }
     }
 

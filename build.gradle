@@ -27,7 +27,7 @@ dependencies {
 
     //==== Select a JME Physics Engine
     //OPTION A: Minie
-    implementation 'com.github.stephengold:Minie:2.0.0'
+    implementation 'com.github.stephengold:Minie:3.0.0'
     //OPTION B: Native Bullet
     //implementation "org.jmonkeyengine:jme3-bullet:$jmeVer"
     //implementation "org.jmonkeyengine:jme3-bullet-native:$jmeVer"
